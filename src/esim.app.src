@@ -1,0 +1,12 @@
+{application, esim,
+ [
+  {description, ""},
+  {vsn, "1"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib
+                 ]},
+  {mod, { esim_app, []}},
+  {env, []}
+ ]}.
