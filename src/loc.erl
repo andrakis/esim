@@ -17,9 +17,6 @@
 
 -include("include/locations.hrl").
 
-%% The state record this module uses
--define(state, #location).
-
 -export([start_link/0, stop/1]).
 
 %% GenServer callbacks
@@ -37,10 +34,9 @@
 %% @doc Perform an iteration, and instruct all sub locations and actors to
 %%      perform their iterations. Calls Callback(Ref) when all such instructed
 %%      actors and locations have finished their iterations.
--spec iterate(LocationPid::pid(), Ref::reference(),
-      Callback::fun((Ref::reference()) -> _)) -> ok.
-iterate(LocationPid, Ref, Callback) when is_reference(Ref), is_function(Callback, 1) ->
-	gen_server:cast(LocationPid, {iterate, Ref, Callback}).
+-spec iterate(LocationPid::pid(), Callback::fun((Ref::reference()) -> _)) -> ok.
+iterate(LocationPid, Callback) when is_function(Callback, 1) ->
+	gen_server:cast(LocationPid, {iterate, Callback}).
 
 -spec start_link() -> ServerPid::pid().
 start_link() ->
@@ -55,16 +51,16 @@ stop(Pid) ->
 %%============================================================================
 
 %% @doc Initialize the server.
--spec init([]) -> {ok, ?state{}}.
+-spec init([]) -> {ok, #location{}}.
 init([]) ->
 	process_flag(trap_exit, true),
-	State = ?state{
-		snapshot = ?state{}
+	State = #location{
+		snapshot = #location{}
 	},
 	{ok, State}.
 
 %% @doc Handling call messages
--spec handle_call(term(), From::{Pid::pid(), Ref::reference()}, State::?state{}) ->
+-spec handle_call(term(), From::{Pid::pid(), Ref::reference()}, State::#location{}) ->
       term().
 handle_call(stop, _From, State) ->
 	{stop, normal, ok, State};
