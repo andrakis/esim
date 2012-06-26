@@ -11,13 +11,23 @@
 
 -record(location, {
 	% All the locations within this location
-	sub_lococations = []     :: [#location{}],
+	sub_locations = []       :: [pid()],
 	% All the actors in this part of the location (not including sub-locations)
-	actors = []              :: [#actor{}],
+	actors = []              :: [pid()],
+	% The current iteration reference
+	iteration_reference      :: reference(),
+	% Iteration callbacks we're still waiting for
+	iteration_waitlist = []  :: [pid()],
+	% Who asked for this iteration?
+	iteration_callee         :: pid(),
+	% The module that will handle events
+	module = loc             :: atom(),
 	% Specific location record goes here
 	location_state           :: term(),
 	% A snapshot of every member in this location
-	snapshot                 :: #location{}
+	snapshot = []            :: [term()],
+	% The new snapshot as we build it
+	snapshot_building = []   :: [term()]
 }).
 
 -endif.
