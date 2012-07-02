@@ -221,6 +221,26 @@ i_handle_callback_result(Result0, #location{} = Location0) ->
 		{ok, Result1} ->
 			Location0#location{
 				state = Result1
+			};
+		{sub_location, add, Pid, State1} ->
+			Location0#location{
+				sub_locations = [Pid | Location0#location.sub_locations],
+				state = State1
+			};
+		{sub_location, remove, Pid, State1} ->
+			Location0#location{
+				sub_locations = Location0#location.sub_locations -- [Pid],
+				state = State1
+			};
+		{actor, add, Pid, State1} ->
+			Location0#location{
+				actors = [Pid | Location0#location.actors],
+				state = State1
+			};
+		{actor, remove, Pid, State1} ->
+			Location0#location{
+				actors = Location0#location.actors -- [Pid],
+				state = State1
 			}
 	end.
 
