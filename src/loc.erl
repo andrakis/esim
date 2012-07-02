@@ -15,7 +15,7 @@
 %% The default behaviour can be relied on or used as a reference implementation.
 %%
 %% Create
-%%   handle_create() -> InitialModuleState::term()
+%%   handle_create(InitialState::term()) -> InitialModuleState::term()
 %%
 %%   Create the initial state for the location.
 %%
