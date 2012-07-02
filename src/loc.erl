@@ -172,13 +172,13 @@ handle_cast({iterate_complete, Pid, Ref, FinalState}, #location{
 			Location0;
 		{[Pid], []} ->
 			% Finished!
-			LocationTmp = Location0#location{
+			SnapshotComplete = [FinalState | Location0#location.snapshot_building],
+			iterate_complete(self(), Ref, SnapshotComplete),
+			Location0#location{
 				iteration_waitlist = [],
-				snapshot = [FinalState | Location0#location.snapshot_building],
+				snapshot = SnapshotComplete,
 				snapshot_building = []
-			},
-			iterate_complete(self(), Ref, LocationTmp#location.snapshot),
-			LocationTmp;
+			};
 		{[Pid], Rem} ->
 			Location0#location{
 				iteration_waitlist = Rem,
