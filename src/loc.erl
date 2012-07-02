@@ -10,11 +10,17 @@
 %% have the key.
 %%
 %%
-%% This is a behaviour module - it expects the following callbacks to be
-%% implemented by the creating module:
+%% This is a behaviour module - it expects the a number of callbacks to be
+%% implemented by the module provided to new/2.
+%% The default behaviour can be relied on or used as a reference implementation.
+%%
+%% Create
+%%   handle_create() -> InitialModuleState::term()
+%%
+%%   Create the initial state for the location.
 %%
 %% Iterate
-%%   iterate(ModuleState::term()) -> NewModuleState::term()
+%%   handle_iterate(ModuleState::term()) -> NewModuleState::term()
 %%
 %%   Perform an iteration - do any simulation tasks required. Return the new
 %%   module state.
@@ -27,6 +33,10 @@
 
 -include("include/gen.hrl").
 -include("include/locations.hrl").
+
+%% Default behaviour callbacks
+-export([handle_iterate/1]).
+-export([handle_create/1]).
 
 %% ESim API
 -export([iterate/3]).
@@ -46,10 +56,6 @@
 
 %% Call messages handled
 -type call_messages() ::
-	% Search for an item
-	% XXX(Julian): This was added in the hopes that Dialyzer would complain ...
-	%              well, it doesn't. :\
-	{search, SearchTerm::term()} |
 	% Stop the server
 	stop.
 
@@ -60,10 +66,36 @@
 	% The result of an iteraton.
 	{iterate_complete, Pid::pid(), Ref::reference(), FinalState::#location{} | #actor{}}.
 
+% The different return values supported for all callbacks.
+-type callback_result(State) ::
+	% Success. New state is...
+	{ok, NewState::State} |
+	{stop, Error::term(), FinalState::State} |
+	{sub_location, add | remove, SubLocation::pid(), NewState::State} |
+	{actor, add | remove, Actor::pid(), NewState::State}.
+-export_type([callback_result/1]).
+
+%%============================================================================
+%% Reference behaviour implementation
+%%============================================================================
+
+%% @doc Handle the initial creation of the location. The InitialState passed
+%%      in from new/2 is passed to this function.
+-spec handle_create(InitialState::term()) -> callback_result(term()).
+handle_create(InitialState) ->
+	% Create your module state based on InitialState
+	ModuleState = InitialState,
+	{ok, ModuleState}.
+
+%% @doc Handle an iteration.
+-spec handle_iterate(State) -> callback_result(State).
+handle_iterate(State0) -> {ok, State0}.
+
 %% Behaviour
 -spec behaviour_info(callbacks | term()) -> [{Callback::atom(), Arity::pos_integer()}] | undefined.
 behaviour_info(callbacks) ->
-	[{iterate, 1}];
+	[{handle_create, 0},
+	 {handle_iterate, 1}];
 behaviour_info(_) ->
 	undefined.
 
@@ -74,13 +106,20 @@ behaviour_info(_) ->
 %% @doc Perform an iteration, and instruct all sub locations and actors to
 %%      perform their iterations. Calls Callback(Ref) when all such instructed
 %%      actors and locations have finished their iterations.
--spec iterate(LocationPid::pid(), Ref::reference(), Callee::pid()) -> ok.
-iterate(LocationPid, Ref, Callee) ->
-	gen_server:cast(LocationPid, {iterate, Ref, Callee}).
+-spec iterate(Pid::pid(), Ref::reference(), Callee::pid()) -> ok.
+iterate(Pid, Ref, Callee) ->
+	gen_server:cast(Pid, {iterate, Ref, Callee}),
+	ok.
+
+%% @doc Complete an iteration.
+-spec iterate_complete(Pid::pid(), Ref::reference(), FinalState::term()) -> ok.
+iterate_complete(Pid, Ref, FinalState) ->
+	gen_server:cast(Pid, {iterate_complete, self(), Ref, FinalState}).
 
 -spec new(HandlingModule::atom(), InitialState::term()) -> gen_new().
 new(HandlingModule, InitialState) ->
-	gen_server:start_link(?MODULE, {HandlingModule, InitialState}, []).
+	{ok, ModuleState} = HandlingModule:handle_create(InitialState),
+	gen_server:start_link(?MODULE, {HandlingModule, ModuleState}, []).
 
 -spec stop(Pid::pid()) -> ok.
 stop(Pid) ->
@@ -91,12 +130,12 @@ stop(Pid) ->
 %%============================================================================
 
 %% @doc Initialize the server.
--spec init({HandlingModule::atom(), InitialState::term()}) -> {ok, #location{}}.
-init({HandlingModule, InitialState}) ->
+-spec init({HandlingModule::atom(), ModuleState::term()}) -> {ok, #location{}}.
+init({HandlingModule, ModuleState}) ->
 	process_flag(trap_exit, true),
 	Location = #location{
 		module = HandlingModule,
-		location_state = InitialState
+		state = ModuleState
 	},
 	{ok, Location}.
 
@@ -105,24 +144,23 @@ init({HandlingModule, InitialState}) ->
 	{stop, _, _, _}.
 handle_call(stop, _From, Location) ->
 	{stop, normal, ok, Location}.
-%handle_call(Request, _From, Location) ->
-%	error_logger:error_msg("~p: Unknown call: ~p~n", [?MODULE, Request]),
-%	{reply, error, Location}.
 
 -spec handle_cast(cast_messages(), Location0::#location{}) ->
 	{noreply, _}.
 
 %% Handle an iteration request. Saves the current snapshot and starts a new iteration.
-handle_cast({iterate, Callee, Ref}, Location0) ->
-	Location1 = Location0#location{
+handle_cast({iterate, Callee, Ref}, #location{ module = Module } = Location0) ->
+	Result = Module:handle_iterate(Location0#location.state),
+	Location1 = i_handle_callback_result(Result, Location0),
+	Location2 = Location1#location{
 		iteration_reference = Ref,
-		iteration_waitlist = Location0#location.sub_locations ++ Location0#location.actors,
+		iteration_waitlist = Location1#location.sub_locations ++ Location1#location.actors,
 		iteration_callee = Callee,
-		snapshot = Location0#location.snapshot_building,
+		snapshot = Location1#location.snapshot_building,
 		snapshot_building = []
 	},
-	[ iterate(Pid, Ref, self()) || Pid <- Location1#location.iteration_waitlist ],
-	{noreply, Location1};
+	[ iterate(Pid, Ref, self()) || Pid <- Location2#location.iteration_waitlist ],
+	{noreply, Location2};
 
 %% Handle an iteration complete message
 handle_cast({iterate_complete, Pid, Ref, FinalState}, #location{
@@ -133,6 +171,15 @@ handle_cast({iterate_complete, Pid, Ref, FinalState}, #location{
 		{[], _} ->
 			error_logger:error_msg("~p: Received iterate_complete from an unknown member~n", [?MODULE]),
 			Location0;
+		{[Pid], []} ->
+			% Finished!
+			LocationTmp = Location0#location{
+				iteration_waitlist = [],
+				snapshot = [FinalState | Location0#location.snapshot_building],
+				snapshot_building = []
+			},
+			iterate_complete(self(), Ref, LocationTmp#location.snapshot),
+			LocationTmp;
 		{[Pid], Rem} ->
 			Location0#location{
 				iteration_waitlist = Rem,
@@ -166,22 +213,81 @@ code_change(_OldVsn, Location, _Extra) ->
 %% Internal functions
 %%============================================================================
 
+%% @doc Handle the result of a callback. All callbacks may issue instructions
+%%      by returning a type of callback_result/1.
+-spec i_handle_callback_result(Result0::callback_result(term()),
+	Location0::location()) -> Location1::location().
+i_handle_callback_result(Result0, #location{} = Location0) ->
+	case Result0 of
+		{ok, Result1} ->
+			Location0#location{
+				state = Result1
+			}
+	end.
+
 %%============================================================================
 %% Test functions
 %%============================================================================
 -ifdef(TEST).
 
 new_test() ->
-	{ok, Pid} = new(?MODULE, undefined),
-	stop(Pid).
+	?assertMatch({ok, _}, new(?MODULE, undefined)).
 
 init_test() ->
 	?assertMatch({ok, #location{}}, init({undefined, undefined})).
 
-stop_test() ->
-	?assertMatch({stop, normal, ok, #location{}}, handle_call(stop, undefined, #location{})),
-	{ok, Pid} = new(?MODULE, undefined),
-	stop(Pid),
-	?assertEqual(false, is_process_alive(Pid)).
+iterate_test() ->
+	Self = self(),
+	Location0 = #location{
+		sub_locations = [Self]
+	},
+	Ref = make_ref(),
+	?assertMatch({noreply, #location{
+		iteration_reference = Ref,
+		iteration_waitlist = [Self],
+		iteration_callee = Self
+	}}, handle_cast({iterate, Self, Ref}, Location0)),
+	% Note: normally this would be called from Pid's process. Since we
+	% directly called handle_cast, it's actually our pid.
+	?assertEqual(ok, receive
+		{'$gen_cast', {iterate, Ref, Self}} ->
+			ok
+		after 1000 ->
+			error
+	end).
+
+iterate_complete_test() ->
+	Self = self(),
+	Ref = make_ref(),
+	LocationOne = #location{
+		iteration_reference = Ref,
+		iteration_waitlist = [Self],
+		iteration_callee = Self
+	},
+	LocationMany = LocationOne#location{
+		iteration_waitlist = [placeholder | LocationOne#location.iteration_waitlist]
+	},
+	?assertMatch({noreply, #location{
+		iteration_waitlist = [placeholder],
+		snapshot_building = [_ | _]
+	}}, handle_cast({iterate_complete, Self, Ref, finalstate}, LocationMany)),
+	?assertMatch({noreply, #location{
+		iteration_waitlist = [],
+		snapshot = [finalstate],
+		snapshot_building = []
+	}}, handle_cast({iterate_complete, Self, Ref, finalstate}, LocationOne)),
+	?assertMatch(ok, receive
+		{'$gen_cast', {iterate_complete, Self, Ref, [finalstate]}} ->
+			ok
+		after 1000 ->
+			error
+	end).
+
+%% @doc Test that the various result to callback_result affect the state as
+%%      desired.
+callback_result_test() ->
+	Fun = fun i_handle_callback_result/2,
+	State0 = #location{ state = notset },
+	?assertMatch(#location{ state = now_set }, Fun({ok, now_set}, State0)).
 
 -endif.

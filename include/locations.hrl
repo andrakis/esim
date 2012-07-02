@@ -23,11 +23,12 @@
 	% The module that will handle events
 	module = loc             :: atom(),
 	% Specific location record goes here
-	location_state           :: term(),
+	state                    :: term(),
 	% A snapshot of every member in this location
 	snapshot = []            :: [term()],
 	% The new snapshot as we build it
 	snapshot_building = []   :: [term()]
 }).
+-type location() :: #location{}.
 
 -endif.
