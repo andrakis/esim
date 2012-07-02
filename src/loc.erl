@@ -70,7 +70,6 @@
 -type callback_result(State) ::
 	% Success. New state is...
 	{ok, NewState::State} |
-	{stop, Error::term(), FinalState::State} |
 	{sub_location, add | remove, SubLocation::pid(), NewState::State} |
 	{actor, add | remove, Actor::pid(), NewState::State}.
 -export_type([callback_result/1]).
