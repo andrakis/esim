@@ -285,8 +285,20 @@ iterate_complete_test() ->
 %% @doc Test that the various result to callback_result affect the state as
 %%      desired.
 callback_result_test() ->
+	Self = self(),
 	Fun = fun i_handle_callback_result/2,
 	State0 = #location{ state = notset },
-	?assertMatch(#location{ state = now_set }, Fun({ok, now_set}, State0)).
+	?assertMatch(#location{ state = now_set }, Fun({ok, now_set}, State0)),
 
+	% Adding and removing sub locations
+	SubLocAdd = Fun({sub_location, add, Self, add_loc}, State0),
+	?assertMatch(#location{ state = add_loc, sub_locations = [Self] }, SubLocAdd),
+	SubLocRem = Fun({sub_location, remove, Self, rem_loc}, SubLocAdd),
+	?assertMatch(#location{ state = rem_loc, sub_locations = [] }, SubLocRem),
+
+	% Adding and removing actor
+	ActorAdd = Fun({actor, add, Self, add_act}, State0),
+	?assertMatch(#location{ state = add_act, actors = [Self] }, ActorAdd),
+	ActorRem = Fun({actor, remove, Self, rem_act}, ActorAdd),
+	?assertMatch(#location{ state = rem_act, actors = [] }, ActorRem).
 -endif.
