@@ -255,6 +255,12 @@ i_handle_callback_result(Result0, #location{} = Location0) ->
 new_test() ->
 	?assertMatch({ok, _}, new(?MODULE, undefined)).
 
+handle_create_test() ->
+	?assertMatch({ok, my_state}, handle_create(my_state)).
+
+handle_iterate_test() ->
+	?assertMatch({ok, my_state}, handle_iterate(my_state)).
+
 init_test() ->
 	?assertMatch({ok, #location{}}, init({undefined, undefined})).
 
