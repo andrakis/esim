@@ -15,6 +15,9 @@
 
 -export([new/2, stop/1]).
 
+%% Default behaviour callbacks
+-export([handle_create/1]).
+
 %% GenServer callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
@@ -25,7 +28,22 @@
 -include_lib("eunit/include/eunit.hrl").
 -endif.
 
-%% Internal functions
+% The different return values supported for all callbacks.
+-type callback_result(State) ::
+	% Success. New state is...
+	{ok, NewState::State}.
+
+%%============================================================================
+%% Reference behaviour implementation
+%%============================================================================
+
+%% @doc Handle the initial creation of the location. The InitialState passed
+%%      in from new/2 is passed to this function.
+-spec handle_create(InitialState::term()) -> callback_result(term()).
+handle_create(InitialState) ->
+	% Create your module state based on InitialState
+	ModuleState = InitialState,
+	{ok, ModuleState}.
 
 %%============================================================================
 %% API functions
@@ -48,11 +66,14 @@ stop(Pid) ->
 %%============================================================================
 
 %% @doc Initialize the server.
--spec init([]) -> {ok, actor()}.
-init([]) ->
+-spec init({HandlingModule::atom(), ModuleState::term()}) -> {ok, actor()}.
+init({HandlingModule, ModuleState}) ->
 	process_flag(trap_exit, true),
-	State = #actor{},
-	{ok, State}.
+	Actor = #actor{
+		module = HandlingModule,
+		state = ModuleState
+	},
+	{ok, Actor}.
 
 %% @doc Handling call messages
 -spec handle_call(term(), From::{Pid::pid(), Ref::reference()}, State::actor()) ->
@@ -88,3 +109,16 @@ code_change(_OldVsn, State, _Extra) ->
 %%============================================================================
 %% Test functions
 %%============================================================================
+
+-ifdef(TEST).
+
+new_test() ->
+	?assertMatch({ok, _}, new(?MODULE, undefined)).
+
+handle_create_test() ->
+	?assertMatch({ok, my_state}, handle_create(my_state)).
+
+init_test() ->
+	?assertMatch({ok, #actor{}}, init({undefined, undefined})).
+
+-endif.
