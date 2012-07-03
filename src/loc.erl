@@ -31,8 +31,8 @@
 -module(loc).
 -behavior(gen_server).
 
--include("include/gen.hrl").
--include("include/locations.hrl").
+-include("gen.hrl").
+-include("locations.hrl").
 
 %% Default behaviour callbacks
 -export([handle_iterate/1]).
@@ -115,11 +115,14 @@ iterate(Pid, Ref, Callee) ->
 iterate_complete(Pid, Ref, FinalState) ->
 	gen_server:cast(Pid, {iterate_complete, self(), Ref, FinalState}).
 
+%% @doc Create a new Location. InitialState is passed to
+%%      HandlingMoudle:handle_create to receive the initial state.
 -spec new(HandlingModule::atom(), InitialState::term()) -> gen_new().
 new(HandlingModule, InitialState) ->
 	{ok, ModuleState} = HandlingModule:handle_create(InitialState),
 	gen_server:start_link(?MODULE, {HandlingModule, ModuleState}, []).
 
+%% @doc Stop the given Location.
 -spec stop(Pid::pid()) -> ok.
 stop(Pid) ->
 	gen_server:call(Pid, stop).
