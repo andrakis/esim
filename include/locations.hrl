@@ -10,6 +10,11 @@
 -include("include/actors.hrl").
 
 -record(location, {
+	% The name of this location. Should be unique, but no guarantee is given.
+	% The name will be registered in the addr_book.
+	name                     :: undefined | binary(),
+	% Parent location
+	parent                   :: undefined | pid(),
 	% All the locations within this location
 	sub_locations = []       :: [pid()],
 	% All the actors in this part of the location (not including sub-locations)
@@ -30,5 +35,8 @@
 	snapshot_building = []   :: [term()]
 }).
 -type location() :: #location{}.
+
+% The type of locations available
+-define(loc_generic, generic).
 
 -endif.

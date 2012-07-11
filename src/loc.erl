@@ -37,6 +37,7 @@
 %% Default behaviour callbacks
 -export([handle_iterate/1]).
 -export([handle_create/1]).
+-export([handle_type/1]).
 
 %% ESim API
 -export([iterate/3]).
@@ -90,11 +91,16 @@ handle_create(InitialState) ->
 -spec handle_iterate(State) -> callback_result(State).
 handle_iterate(State0) -> {ok, State0}.
 
+%% @doc Handle a request for the type of location this is.
+-spec handle_type(State::term()) -> Type::term().
+handle_type(_) -> ?loc_generic.
+
 %% Behaviour
 -spec behaviour_info(callbacks | term()) -> [{Callback::atom(), Arity::pos_integer()}] | undefined.
 behaviour_info(callbacks) ->
 	[{handle_create, 0},
-	 {handle_iterate, 1}];
+	 {handle_iterate, 1},
+	 {handle_type, 1}];
 behaviour_info(_) ->
 	undefined.
 
@@ -260,6 +266,9 @@ handle_create_test() ->
 
 handle_iterate_test() ->
 	?assertMatch({ok, my_state}, handle_iterate(my_state)).
+
+handle_type_test() ->
+	?assertMatch(?loc_generic, handle_type(any_state)).
 
 init_test() ->
 	?assertMatch({ok, #location{}}, init({undefined, undefined})).
