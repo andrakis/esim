@@ -68,23 +68,27 @@
 %% API functions
 %%============================================================================
 
+-spec start_global() -> {ok, Pid::pid()}.
 start_global() ->
 	State = #state{
 		is_global = true
 	},
 	gen_server:start_link({global, ?SERVER}, ?MODULE, State, []).
 
+-spec start_local() -> {ok, Pid::pid()}.
 start_local() ->
 	State = #state{
 		is_global = false
 	},
 	gen_server:start_link(?MODULE, State, []).
 
+-spec stop_global() -> _.
 stop_global() ->
-	gen_server:stop(?SERVER).
+	gen_server:cast({global, ?SERVER}, stop).
 
+-spec stop(Pid::pid()) -> _.
 stop(Pid) ->
-	gen_server:stop(Pid).
+	gen_server:cast(Pid, stop).
 
 %%============================================================================
 %% GenServer callbacks
@@ -138,10 +142,12 @@ code_change(_OldVsn, State, _Extra) ->
 
 global_test() ->
 	start_global(),
-	?assertEqual(test, gen_server:call({global, ?SERVER}, test)).
+	?assertEqual(test, gen_server:call({global, ?SERVER}, test)),
+	stop_global().
 
 local_test() ->
 	{ok, Pid} = start_local(),
-	?assertMatch(test, gen_server:call(Pid, test)).
+	?assertMatch(test, gen_server:call(Pid, test)),
+	stop(Pid).
 
 -endif.
