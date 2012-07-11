@@ -9,8 +9,12 @@
 %% Supervisor callbacks
 -export([init/1]).
 
-%% Helper macro for declaring children of supervisor
--define(CHILD(I, Type), {I, {I, start_link, []}, permanent, 5000, Type, [I]}).
+%% Services that must be started
+-define(SERVICES, [{worker, addr_book, start_local, []}]).
+
+%% Service start options
+-define(RESTART, permanent).
+-define(SHUTDOWN, 2000).
 
 %% ===================================================================
 %% API functions
@@ -24,5 +28,9 @@ start_link() ->
 %% ===================================================================
 
 init([]) ->
-    {ok, { {one_for_one, 5, 10}, []} }.
+	Services = [
+		{Svc, {Svc, Init, Params},
+			?RESTART, ?SHUTDOWN, Type, [Svc]}
+	|| {Type, Svc, Init, Params} <- ?SERVICES ],
+	{ok, {{one_for_all, 10, 5}, Services}}.
 
