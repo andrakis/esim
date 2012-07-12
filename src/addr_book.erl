@@ -19,6 +19,11 @@
 %% TODO: This registers globally, what is the impact of that when another node
 %%       starts up?
 %%
+%% Further TODO: It occurs to me that Erlang dictionaries probably don't branch
+%% out the way a binary tree would - that is, searching for <<"foo">> and
+%% <<"foa">> are probably both somewhat slow, instead of there simply being two
+%% leaves with <<"fo">> as the parent and <<"o">> and <<"a">> as children.
+%%
 %% @author Julian "Andrakis" Thatcher <julian@noblesamurai.com>
 %% @version 0.0.1
 %%
@@ -149,5 +154,85 @@ local_test() ->
 	{ok, Pid} = start_local(),
 	?assertMatch(test, gen_server:call(Pid, test)),
 	stop(Pid).
+
+%% @doc Test that we can add a single item and successfully get it back via
+%%      direct lookup.
+add_test() ->
+	{ok, Book} = start_local(),
+	MyPid = self(),
+	ok = insert(<<"test">>, MyPid, Book),
+	% insert is a cast, wait until the server has finished
+	sync(Book),
+	% We should expect to get a list of results, in all cases.
+	?assertEqual([{found, MyPid}], lookup(<<"test">>, Book)),
+	stop(Book).
+
+%% @doc Test that adding multiple items for the same name will give us multiple
+%%      results.
+%%      This is important, since we may have multiple actors with the same name,
+%%      as you would with any phone book. Further information is only gleaned
+%%      from the actor/location in question.
+add_multi_test() ->
+	{ok, Book} = start_local(),
+	MyPid = self(),
+	AnotherPid = test_other_pid(),
+	ok = insert(<<"test">>, MyPid, Book),
+	ok = insert(<<"test">>, AnotherPid, Book),
+	% insert is a cast, wait until the server has finished
+	sync(Book),
+	% This time, we should get both results. No guarantee is given on the order
+	% results, however.
+	Result = lookup(<<"test">>, Book),
+	?assertEqual(2, length(Result)),
+	% Search for the results via lists:keyfind using the expected result, where
+	% each result is {found, Pid::pid()}.
+	?assertEqual({value, {found, MyPid}}, lists:keyfind(MyPid, 2, Result)),
+	?assertEqual({value, {found, AnotherPid}}, lists:keyfind(AnotherPid, 2, Result)),
+	AnotherPid ! stop,
+	stop(Book).
+
+%% @doc Test that searching for a partial match works. A partial match is where
+%%      you search for <<"test/floor 1">>, and only <<"test">> exists in the
+%%      address book. You would then be directed to <<"test">>'s Pid to further
+%%      query them for <<"test/floor 1">> which they have a record of.
+lookup_partial_test() ->
+	% The partial match address book
+	{ok, Book} = start_local(),
+	MyPid = self(),
+	ok = insert(<<"test">>, MyPid, Book),
+	% insert is a cast, wait until the server has finished
+	sync(Book),
+
+	% Requesters for <<"test*">> will be redirected here, create our own book
+	% further lookups
+	{ok, MyBook} = start_local(),
+	AnotherPid = test_other_pid(),
+	{ok, TestBook} = start_local(),
+	ok = insert(<<"test/a">>, MyPid, MyBook),
+	ok = insert(<<"test/b">>, AnotherPid, MyBook),
+	% insert is a cast, wait until the server has finished
+	sync(MyBook),
+
+	% We should be redirected to (possibly) multiple other processes
+	Result = lookup(<<"test/a">>, Book),
+	?assertEqual([{see, MyBook}], lookup(<<"test/a">>, Book)),
+	?assertEqual([{see, MyBook}], lookup(<<"test/b">>, Book)),
+
+	% Now that we've been redirected, we should be able to find what we're
+	% seeking
+	ResultA = lookup(<<"test/a">>, MyBook),
+	ResultB = lookup(<<"test/b">>, MyBook),
+	?assertEqual({value, {found, MyPid}}, lists:keyfind(MyPid, 2, ResultA)),
+	?assertEqual({value, {found, AnotherPid}}, lists:keyfind(AnotherPid, 2, ResultB)).
+
+
+%% @doc Helper function to create another process that simply waits for 'stop'.
+-spec test_other_pid() -> pid().
+test_other_pid() ->
+	spawn_link(fun() ->
+		receive
+			stop -> ok
+		end
+	end).
 
 -endif.
