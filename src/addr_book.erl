@@ -6,8 +6,8 @@
 %% every state available.
 %%
 %% Searching is perform by way of a path. For example, an actor wishing to
-%% find location townhall cellar, could search with path: [<<"townhall">>,
-%% <<"cellar">>]. The search for the top level would succeed, and the response
+%% find location townhall cellar, could search for: <<"townhall/cellar">>.
+%% This could result in a partial match on <<"townhall">>, which would
 %% would direct the searchee to <<"townhall">>'s Pid.
 %% The actor may then enter <<"townhall">> and consult the address book there.
 %%
