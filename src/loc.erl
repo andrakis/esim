@@ -43,6 +43,12 @@
 -export([iterate/3]).
 -export([behaviour_info/1]).
 
+%% Vis API
+-export([position/2, opposite/1]).
+-export([join/3]).
+-export([tile/1]).
+-export([neighbours/1]).
+
 -export([new/2, stop/1]).
 
 -ifdef(TEST).
@@ -58,7 +64,26 @@
 %% Call messages handled
 -type call_messages() ::
 	% Stop the server
-	stop.
+	stop |
+	% Create a neighbour join to Location in Direction
+	{join, Direction::direction(), Location::pid()} |
+	% Get the tile to display for the text representation
+	get_tile |
+	% Get the neighbours
+	get_neighbours.
+
+%% Call message results
+-type call_results() ::
+	{reply, call_result_inner(), State::location()} |
+	{stop, normal, ok, State::location()}.
+-type call_result_inner() ::
+	% For a join request
+	{join, ok} |             % Success
+	{join, error, blocked} | % Neighbour already present
+	% A tile request
+	{tile, Tile::binary()} |
+	% A neighbour request
+	{neighbours, [neighbour()]}.
 
 %% Cast messages handled
 -type cast_messages() ::
@@ -133,6 +158,57 @@ new(HandlingModule, InitialState) ->
 stop(Pid) ->
 	gen_server:call(Pid, stop).
 
+%% @doc Create a join from Location1 to Location2 in the given Direction.
+%%      This is a one-way join - no join is performed in Locaiton1, unless you manually
+%%      perform the reverse call (eg, join(opposite(Direction), Location2, Location1)).
+-spec join(Direction::direction(), Location1::pid(), Location2::pid()) -> ok | {error, blocked}.
+join(Direction, Location1, Location2) when is_pid(Location1), is_pid(Location2) ->
+	{join, Result} = gen_server:call(Location2, {join, Direction, Location1}),
+	Result.
+
+%%============================================================================
+%% Relations for visualizations.
+%%============================================================================
+
+%% @doc Get the tile for visialization.
+-spec tile(pid()) -> binary().
+tile(Pid) when is_pid(Pid) ->
+	{tile, Tile} = gen_server:call(Pid, get_tile),
+	Tile.
+
+%% @doc Get the neighbours for the given location pid.
+-spec neighbours(Pid::pid()) -> [neighbour()].
+neighbours(Pid) when is_pid(Pid) ->
+	{neighbours, Neighbours} = gen_server:call(Pid, get_neighbours),
+	Neighbours.
+
+%% @doc Convert the direction in a new position, relative to the one given.
+-spec position(direction(), pos()) -> pos().
+position(Direction, {X, Y}) ->
+	case Direction of
+		north -> {X, Y - 1};
+		south -> {X, Y + 1};
+		east  -> {X + 1, Y};
+		west  -> {X - 1, Y};
+		northeast -> {X + 1, Y - 1};
+		southeast -> {X + 1, Y + 1};
+		southwest -> {X - 1, Y + 1};
+		northwest -> {X - 1, Y - 1};
+		_ -> error({badarg, Direction})
+	end.
+
+%% @doc Get the opposite direction to the one given.
+-spec opposite(direction()) -> direction().
+opposite(north) -> south;
+opposite(south) -> north;
+opposite(east) -> west;
+opposite(west) -> east;
+opposite(northeast) -> southwest;
+opposite(southeast) -> northwest;
+opposite(southwest) -> northeast;
+opposite(northwest) -> southeast;
+opposite(What) -> error({badarg, What}).
+
 %%============================================================================
 %% GenServer callbacks
 %%============================================================================
@@ -149,7 +225,28 @@ init({HandlingModule, ModuleState}) ->
 
 %% @doc Handling call messages
 -spec handle_call(call_messages(), From::gen_from(), Location::#location{}) ->
-	{stop, _, _, _}.
+		call_results().
+handle_call({join, Direction, Other}, _From, Location0) ->
+	#location{ neighbours = Neighbours } = Location0,
+	case lists:keyfind(Direction, #neighbour.direction, Neighbours) of
+		false ->
+			% TODO: Notify handling module
+			Location1 = Location0#location{
+				neighbours = [#neighbour{
+					direction = Direction,
+					id = Other
+				} | Neighbours]
+			},
+			{reply, {join, ok}, Location1};
+		_ ->
+			{reply, {join, {error, blocked}}, Location0}
+	end;
+handle_call(get_tile, _From, Location) ->
+	% TODO: Call handling module
+	{reply, {tile, <<" ">>}, Location};
+handle_call(get_neighbours, _From, Location) ->
+	#location{ neighbours = Neighbours } = Location,
+	{reply, {neighbours, Neighbours}, Location};
 handle_call(stop, _From, Location) ->
 	{stop, normal, ok, Location}.
 
@@ -258,8 +355,41 @@ i_handle_callback_result(Result0, #location{} = Location0) ->
 %%============================================================================
 -ifdef(TEST).
 
+-define(CREATE, fun() ->
+	{ok, __Instance} = new(?MODULE, []),
+	__Instance
+end).
+-define(DONE, fun(__Instance) -> stop(__Instance) end).
+
 new_test() ->
 	?assertMatch({ok, _}, new(?MODULE, undefined)).
+
+tile_test() ->
+	L = ?CREATE(),
+	?assertEqual(<<" ">>, tile(L)),
+	?DONE(L).
+
+join_test() ->
+	L = ?CREATE(),
+	A = erlang:list_to_pid("<0.666.0>"),
+	B = erlang:list_to_pid("<0.666.666>"),
+
+	?assertMatch([], neighbours(L)),
+
+	?assertEqual(ok, join(east, A, L)),
+	?assertMatch(#neighbour{
+		direction = east,
+		id = A
+	}, lists:keyfind(east, #neighbour.direction, neighbours(L))),
+
+	% Joining another location in the same direction fails
+	?assertEqual({error, blocked}, join(east, B, L)),
+	?assertMatch(#neighbour{
+		direction = east,
+		id = A
+	}, lists:keyfind(east, #neighbour.direction, neighbours(L))),
+
+	ok.
 
 handle_create_test() ->
 	?assertMatch({ok, my_state}, handle_create(my_state)).

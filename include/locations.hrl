@@ -26,7 +26,25 @@
 -define(DIRECTIONS_2D, [north,  south,  east,  west]).
 -define(DIRECTIONS_3D, [up,  down | ?DIRECTIONS_2D]).
 
+-type direction() :: north | south | east | west | northeast | southeast | southwest | northwest.
+-type room_id() :: reference().
+-type pos() :: {integer(), integer()}.
+
+-define(directions, [north, south, east, west, northeast, southeast, southwest,
+	northwest]).
+-define(all_directions, ?directions ++ [up, down]).
+
+-record(neighbour, {
+	direction :: direction(),
+	id :: location_id()
+}).
+-type neighbour() :: #neighbour{}.
+
+-type location_id() :: reference().
+
 -record(location, {
+	% The unique id of this location.
+	id                       :: location_id(),
 	% The name of this location. Should be unique, but no guarantee is given.
 	% The name will be registered in the addr_book.
 	name                     :: undefined | binary(),
@@ -37,7 +55,7 @@
 	% All the actors in this part of the location (not including sub-locations)
 	actors = []              :: [pid()],
 	% Neighbouring locations
-	neighbours = [],
+	neighbours = []          :: [neighbour()],
 	% The current iteration reference
 	iteration_reference      :: reference(),
 	% Iteration callbacks we're still waiting for
