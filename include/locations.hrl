@@ -37,7 +37,7 @@
 	% All the actors in this part of the location (not including sub-locations)
 	actors = []              :: [pid()],
 	% Neighbouring locations
-	neighbours = []          :: [{direction(), #location{}}],
+	neighbours = [],
 	% The current iteration reference
 	iteration_reference      :: reference(),
 	% Iteration callbacks we're still waiting for
