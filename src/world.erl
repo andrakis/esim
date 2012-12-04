@@ -132,15 +132,24 @@ vis(Room, Rooms) ->
 %% @private
 -spec visualize(Vis::vis()) -> [[binary()]].
 visualize(#vis{} = Vis0) ->
-	Vis1 = map_room(Vis0#vis.root, {0, 0}, Vis0),
-	XSeq = lists:seq(Vis1#vis.min_x, Vis1#vis.max_x),
-	YSeq = lists:seq(Vis1#vis.min_y, Vis1#vis.max_y),
+	{Vis1, Actions} = map_room(Vis0#vis.root, {0, 0}, Vis0),
+	Vis2 = map_loop(Vis1, Actions),
+	XSeq = lists:seq(Vis2#vis.min_x, Vis2#vis.max_x),
+	YSeq = lists:seq(Vis2#vis.min_y, Vis2#vis.max_y),
 	[ begin
-		[ case lists:keyfind({X, Y}, 1, Vis1#vis.visual) of
+		[ case lists:keyfind({X, Y}, 1, Vis2#vis.visual) of
 			false -> <<".">>;
 			{_, Tile} -> Tile
 		  end || X <- XSeq ] ++ [<<"\n">>]
 	  end || Y <- YSeq ].
+
+%% @doc Recusrively perform the map_loop calls required.
+-spec map_loop(Vis::vis(), Actions::[{Room::room(), Position::pos(), Prev::room_id()}]) -> [[binary()]].
+map_loop(Vis0, [{Room, Position, Prev} | Tail]) ->
+	{Vis1, Actions} = map_room(Room, Position, Vis0, Prev),
+	map_loop(Vis1, Actions ++ Tail);
+map_loop(Vis0, _) ->
+	Vis0.
 
 %% @see map_room/4
 %% @private
@@ -162,7 +171,7 @@ map_room(#room{} = Room, Pos, #vis{} = Vis, Prev) ->
 -spec maybe_map_room(IsDone::boolean(), Room::room(), Pos::pos(), Vis::vis(),
 		Prev::room_id()) -> [[binary()]].
 maybe_map_room(true,  _,    _,            Vis, _) ->
-	Vis;
+	{Vis, []};
 maybe_map_room(false, Room, {X, Y} = Pos, #vis{ visual = Visual0} = Vis0, Prev0) ->
 	io:format("Prev0: ~p~n", [Prev0]),
 	Prev1 = if
@@ -197,16 +206,17 @@ maybe_map_room(false, Room, {X, Y} = Pos, #vis{ visual = Visual0} = Vis0, Prev0)
 		max_y = ?if_true(Y + 1 > Vis0#vis.max_y, Y + 1, Vis0#vis.max_y),
 		visual = Visual2
 	},
-	lists:foldl(fun(Direction, VisAcc) ->
+	Actions = lists:foldl(fun(Direction, ActionsAcc) ->
 		case lists:keyfind(Direction, #exit.direction, Room#room.exits) of
 			#exit{ room_id = Id } when Id /= Prev1 ->
 				Rm = lists:keyfind(Id, #room.id, Vis1#vis.rooms),
 				Position = position(Direction, Pos),
-				map_room(Rm, Position, VisAcc, Prev1);
+				[{Rm, Position, Prev1} | ActionsAcc];
 			_ ->
-				VisAcc
+				ActionsAcc
 		end
-	end, Vis1, ?directions).
+	end, [], ?directions),
+	{Vis1, Actions}.
 
 test() ->
 	R1 = room(make_ref(), <<"Start">>, <<>>, [], <<" ">>),
