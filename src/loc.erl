@@ -371,8 +371,8 @@ tile_test() ->
 
 join_test() ->
 	L = ?CREATE(),
-	A = erlang:list_to_pid("<0.666.0>"),
-	B = erlang:list_to_pid("<0.666.666>"),
+	A = erlang:list_to_pid("<0.123.0>"),
+	B = erlang:list_to_pid("<0.123.456>"),
 
 	?assertMatch([], neighbours(L)),
 
