@@ -9,29 +9,11 @@
 
 -include("include/actors.hrl").
 
--record(pos_2d, {
-	x :: integer(),
-	y :: integer()
-}).
--type pos_2d() :: #pos_2d{}.
-
--record(pos_3d, {
-	xy :: pos_2d(),
-	z :: integer()
-}).
--type pos_3d() :: #pos_3d{}.
-
--type direction_2d() :: north | south | east | west.
--type direction_3d() :: direction_2d() | up | down.
--define(DIRECTIONS_2D, [north,  south,  east,  west]).
--define(DIRECTIONS_3D, [up,  down | ?DIRECTIONS_2D]).
-
 -type direction() :: north | south | east | west | northeast | southeast | southwest | northwest.
--type room_id() :: reference().
--type pos() :: {integer(), integer()}.
+-type pos() :: {X::integer(), Y::integer()}.
+-type pos3d() :: {XY::pos(), Z::integer()}.
 
--define(directions, [north, south, east, west, northeast, southeast, southwest,
-	northwest]).
+-define(directions, [north, south, east, west, northeast, southeast, southwest, northwest]).
 -define(all_directions, ?directions ++ [up, down]).
 
 -record(neighbour, {
@@ -40,7 +22,7 @@
 }).
 -type neighbour() :: #neighbour{}.
 
--type location_id() :: reference().
+-type location_id() :: pid().
 
 -record(location, {
 	% The unique id of this location.
@@ -76,5 +58,10 @@
 % The type of locations available
 -define(loc_generic, generic).
 
+% Get the location id when passed a location id or a location.
+-define(location_id(__Loc), (case __Loc of
+	__Pid when is_pid(__Pid) -> __Pid;
+	#location{ id = __Pid } -> __Pid
+end)).
 
 -endif.

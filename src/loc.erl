@@ -48,7 +48,7 @@
 -export([position/2, opposite/1]).
 -export([join/3]).
 -export([tile/1, border/2]).
--export([neighbours/1]).
+-export([neighbours/1, neighbour/2]).
 
 -export([new/2, stop/1]).
 
@@ -71,7 +71,9 @@
 	% Get the border at the given neighbour location
 	{get_border, Direction::direction()} |
 	% Get the neighbours
-	get_neighbours.
+	get_neighbours |
+	% Get one neighbour in Direction
+	{get_neighbour, Direction::direction()}.
 
 %% Call message results
 -type call_results() ::
@@ -85,8 +87,10 @@
 	{tile, Tile::binary()} |
 	% A border tile request
 	{border, Border::binary()} |
-	% A neighbour request
-	{neighbours, [neighbour()]}.
+	% Get all neighbour request
+	{neighbours, [neighbour()]} |
+	% Get one neighbour request
+	{neighbour, neighbour()}.
 
 %% Cast messages handled
 -type cast_messages() ::
@@ -207,6 +211,17 @@ neighbours(Pid) when is_pid(Pid) ->
 	{neighbours, Neighbours} = gen_server:call(Pid, get_neighbours),
 	Neighbours.
 
+%% @doc Get the neighbour at the given location, or return false if one is not present.
+-spec neighbour(Direction::direction(), pid() | location()) -> neighbour() | false.
+neighbour(Direction, #location{ neighbours = Neighbours }) ->
+	case lists:keyfind(Direction, #neighbour.direction, Neighbours) of
+		#neighbour{} = Neighbour -> Neighbour;
+		false -> false
+	end;
+neighbour(Direction, Pid) when is_pid(Pid) ->
+	{neighbour, Neighbour} = gen_server:call(Pid, {get_neighbour, Direction}),
+	Neighbour.
+
 %% @doc Convert the direction in a new position, relative to the one given.
 -spec position(direction(), pos()) -> pos().
 position(Direction, {X, Y}) ->
@@ -272,6 +287,8 @@ handle_call({get_border, Direction}, _From, Location) ->
 	{reply, {border, border(Direction, Location)}, Location};
 handle_call(get_neighbours, _From, Location) ->
 	{reply, {neighbours, neighbours(Location)}, Location};
+handle_call({get_neighbour, Direction}, _From, Location) ->
+	{reply, {neighbour, neighbour(Direction, Location)}, Location};
 handle_call(stop, _From, Location) ->
 	{stop, normal, ok, Location}.
 
@@ -435,6 +452,20 @@ neighbours_test() ->
 	},
 
 	?assertMatch([a, b, c], neighbours(L)),
+
+	ok.
+
+neighbour_test() ->
+	L = #location{
+		neighbours = [
+			#neighbour{ direction = east, id = e },
+			#neighbour{ direction = south, id = s }
+		]
+	},
+
+	?assertEqual(#neighbour{ direction = east, id = e }, neighbour(east, L)),
+	?assertEqual(#neighbour{ direction = south, id = s }, neighbour(south, L)),
+	?assertEqual(false, neighbour(north, L)),
 
 	ok.
 
