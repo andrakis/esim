@@ -1,12 +1,9 @@
+%% -*- erlang -*-
 {application, esim,
- [
-  {description, ""},
-  {vsn, "1"},
+ [{description, "esim"},
+  {vsn, "0.1"},
+  {modules, []},
   {registered, []},
-  {applications, [
-                  kernel,
-                  stdlib
-                 ]},
-  {mod, { esim_app, []}},
-  {env, []}
- ]}.
+  {mod, {'esim_app', []}},
+  {env, []},
+  {applications, [kernel, stdlib, crypto]}]}.
