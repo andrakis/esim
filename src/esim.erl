@@ -17,7 +17,7 @@ start() ->
 stop() ->
 	application:stop(esim).
 
-%% @doc Get an application environment settings. Returns undefined if not set.
+%% @doc Get an application environment setting. Returns undefined if not set.
 -spec get_env(Setting::atom()) -> term() | undefined.
 get_env(Setting) ->
 	get_env(Setting, undefined).
