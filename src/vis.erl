@@ -23,6 +23,9 @@
 -type loc() :: location_id() | location().
 -export_type([loc/0]).
 
+-type visual_map() :: [{pos(), binary()}].
+-type map_location_result() :: {Location::loc(), Pos::pos(), Prev::location_id()}.
+
 -record(vis, {
 	locations = [] :: {location_id(), loc()},
 	root           :: loc(),
@@ -30,7 +33,7 @@
 	min_y = -1     :: neg_integer(),
 	max_x =  1     :: pos_integer(),
 	max_y =  1     :: pos_integer(),
-	visual = []    :: [{pos(), binary()}],
+	visual = []    :: visual_map(),
 	done = []      :: [{pos(), done}]
 }).
 -type vis() :: #vis{}.
@@ -79,13 +82,14 @@ map_loop(Vis0, _) ->
 
 %% @see map_location/4
 %% @private
--spec map_location(Location::loc(), Pos::pos(), Vis::vis()) -> [[binary()]].
+-spec map_location(Location::loc(), Pos::pos(), Vis::vis()) -> map_location_result().
 map_location(Location, Pos, #vis{} = Vis) ->
 	map_location(Location, Pos, Vis, nil).
 
 %% @doc Map a given location, and all of its connected locations.
 %% @private
--spec map_location(Location::loc(), Pos::pos(), Vis::vis(), Prev::location_id()) -> [[binary()]].
+-spec map_location(Location::loc(), Pos::pos(), Vis::vis(), Prev::location_id()) ->
+		map_location_result().
 map_location(Location, Pos, #vis{} = Vis, Prev) ->
 	IsDone = lists:keyfind(Pos, 1, Vis#vis.done) == {Pos, done},
 	maybe_map_location(IsDone, Location, Pos, Vis, Prev).
@@ -95,7 +99,7 @@ map_location(Location, Pos, #vis{} = Vis, Prev) ->
 %% @doc Map a location only if it has not been done yet, as specified by IsDone.
 %% @private
 -spec maybe_map_location(IsDone::boolean(), Location::loc(), Pos::pos(), Vis::vis(),
-		Prev::location_id()) -> [[binary()]].
+		Prev::location_id()) -> map_location_result().
 maybe_map_location(true,  _,    _,            Vis, _) ->
 	{Vis, []};
 maybe_map_location(false, Location, {X, Y} = Pos, #vis{ visual = Visual0 } = Vis0, Prev0) ->
@@ -105,20 +109,7 @@ maybe_map_location(false, Location, {X, Y} = Pos, #vis{ visual = Visual0 } = Vis
 	end,
 	Tile = loc:tile(Location),
 	Visual1 = [{Pos, Tile} | Visual0],
-	Visual2 = lists:foldl(fun(Direction, VisualAcc) ->
-		Position = loc:position(Direction, Pos),
-		case lists:keyfind(Position, 1, VisualAcc) of
-			false ->
-				case loc:neighbour(Direction, Location) of
-					#neighbour{ id = Id } ->
-						Neighbour = lists:keyfind(Id, 1, Vis0#vis.locations),
-						[{Position, loc:border(Direction, Neighbour)} | VisualAcc];
-					_ -> VisualAcc
-				end;
-			_ ->
-				VisualAcc
-		end
-	end, Visual1, ?directions),
+	Visual2 = maybe_map_borders(?directions, Location, Pos, Vis0, Visual1),
 	Vis1 = Vis0#vis{
 		done = [{Pos, done} | Vis0#vis.done],
 		min_x = ?if_true(X - 1 < Vis0#vis.min_x, X - 1, Vis0#vis.min_x),
@@ -139,6 +130,28 @@ maybe_map_location(false, Location, {X, Y} = Pos, #vis{ visual = Visual0 } = Vis
 	end, [], ?directions),
 	{Vis1, Actions}.
 
+%% @doc Map the borders around Location, unless a location is defined at Pos.
+%% @private
+-spec maybe_map_borders([direction()], Location::loc(), Pos::pos(), Vis::vis(),
+		Visual::visual_map()) -> visual_map().
+maybe_map_borders([Direction | Tail], Location, Pos, Vis, Visual0) ->
+	Position = loc:position(Direction, Pos),
+	Visual1 = case lists:keyfind(Position, 1, Visual0) of
+		false ->
+			case loc:neighbour(Direction, Location) of
+				#neighbour{ id = Id } ->
+					Neighbour = lists:keyfind(Id, 1, Vis#vis.locations),
+					[{Position, loc:border(Direction, Neighbour)} | Visual0];
+				_ ->
+					Visual0
+			end;
+		_ ->
+			Visual0
+	end,
+	maybe_map_borders(Tail, Location, Pos, Vis, Visual1);
+maybe_map_borders([], _Location, _Pos, _Vis, Visual) ->
+	Visual.
+
 %%============================================================================
 %% Test functions
 %%============================================================================
@@ -154,6 +167,8 @@ setup() ->
 
 cleanup(_) ->
 	ok.
+
+%% TODO: maybe_map_borders_test.
 
 %% TODO: Make this test more low-level.
 visualize_test(_) ->
