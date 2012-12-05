@@ -38,7 +38,7 @@
 -export([handle_iterate/1]).
 -export([handle_create/1]).
 -export([handle_type/1]).
--export([handle_tile/1]).
+-export([handle_tile/1, handle_border/2]).
 
 %% ESim API
 -export([iterate/3]).
@@ -47,14 +47,12 @@
 %% Vis API
 -export([position/2, opposite/1]).
 -export([join/3]).
--export([tile/1]).
+-export([tile/1, border/2]).
 -export([neighbours/1]).
 
 -export([new/2, stop/1]).
 
--ifdef(TEST).
--include_lib("eunit/include/eunit.hrl").
--endif.
+-include("test.hrl").
 
 %% GenServer callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -70,6 +68,8 @@
 	{join, Direction::direction(), Location::pid()} |
 	% Get the tile to display for the text representation
 	get_tile |
+	% Get the border at the given neighbour location
+	{get_border, Direction::direction()} |
 	% Get the neighbours
 	get_neighbours.
 
@@ -83,6 +83,8 @@
 	{join, error, blocked} | % Neighbour already present
 	% A tile request
 	{tile, Tile::binary()} |
+	% A border tile request
+	{border, Border::binary()} |
 	% A neighbour request
 	{neighbours, [neighbour()]}.
 
@@ -124,6 +126,12 @@ handle_type(_) -> ?loc_generic.
 %% @doc Handle a request for the tile of this location.
 -spec handle_tile(State::term()) -> binary().
 handle_tile(_) -> <<" ">>.
+
+%% @doc Handle a request for the border for neighbour at Direction.
+-spec handle_border(Direction::direction(), State::term()) -> binary().
+handle_border(_Direction, _State) ->
+	% TODO: Get the tile of neighbour at Direction, or return art at Direction.
+	<<".">>.
 
 %% Behaviour
 -spec behaviour_info(callbacks | term()) -> [{Callback::atom(), Arity::pos_integer()}] | undefined.
@@ -182,6 +190,14 @@ tile(#location{ module = Module, state = State }) ->
 tile(Pid) when is_pid(Pid) ->
 	{tile, Tile} = gen_server:call(Pid, get_tile),
 	Tile.
+
+%% @doc Get the border tile at the given neighbour.
+-spec border(Direction::direction(), pid() | location()) -> binary().
+border(Direction, #location{ module = Module, state = State }) ->
+	Module:handle_border(Direction, State);
+border(Direction, Pid) when is_pid(Pid) ->
+	{border, Border} = gen_server:call(Pid, {get_border, Direction}),
+	Border.
 
 %% @doc Get the neighbours for the given location pid.
 -spec neighbours(pid() | location()) -> [neighbour()].
@@ -252,6 +268,8 @@ handle_call({join, Direction, Other}, _From, Location0) ->
 	end;
 handle_call(get_tile, _From, Location) ->
 	{reply, {tile, tile(Location)}, Location};
+handle_call({get_border, Direction}, _From, Location) ->
+	{reply, {border, border(Direction, Location)}, Location};
 handle_call(get_neighbours, _From, Location) ->
 	{reply, {neighbours, neighbours(Location)}, Location};
 handle_call(stop, _From, Location) ->
@@ -375,6 +393,15 @@ tile_test() ->
 	L = ?CREATE(),
 
 	?assertEqual(<<" ">>, tile(L)),
+
+	?DONE(L),
+
+	ok.
+
+border_test() ->
+	L = ?CREATE(),
+
+	?assertEqual(<<".">>, border(east, L)),
 
 	?DONE(L),
 
