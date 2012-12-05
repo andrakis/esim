@@ -38,6 +38,7 @@
 -export([handle_iterate/1]).
 -export([handle_create/1]).
 -export([handle_type/1]).
+-export([handle_tile/1]).
 
 %% ESim API
 -export([iterate/3]).
@@ -120,6 +121,10 @@ handle_iterate(State0) -> {ok, State0}.
 -spec handle_type(State::term()) -> Type::term().
 handle_type(_) -> ?loc_generic.
 
+%% @doc Handle a request for the tile of this location.
+-spec handle_tile(State::term()) -> binary().
+handle_tile(_) -> <<" ">>.
+
 %% Behaviour
 -spec behaviour_info(callbacks | term()) -> [{Callback::atom(), Arity::pos_integer()}] | undefined.
 behaviour_info(callbacks) ->
@@ -171,13 +176,17 @@ join(Direction, Location1, Location2) when is_pid(Location1), is_pid(Location2) 
 %%============================================================================
 
 %% @doc Get the tile for visialization.
--spec tile(pid()) -> binary().
+-spec tile(pid() | location()) -> binary().
+tile(#location{ module = Module, state = State }) ->
+	Module:handle_tile(State);
 tile(Pid) when is_pid(Pid) ->
 	{tile, Tile} = gen_server:call(Pid, get_tile),
 	Tile.
 
 %% @doc Get the neighbours for the given location pid.
--spec neighbours(Pid::pid()) -> [neighbour()].
+-spec neighbours(pid() | location()) -> [neighbour()].
+neighbours(#location{ neighbours = Neighbours }) ->
+	Neighbours;
 neighbours(Pid) when is_pid(Pid) ->
 	{neighbours, Neighbours} = gen_server:call(Pid, get_neighbours),
 	Neighbours.
@@ -242,11 +251,9 @@ handle_call({join, Direction, Other}, _From, Location0) ->
 			{reply, {join, {error, blocked}}, Location0}
 	end;
 handle_call(get_tile, _From, Location) ->
-	% TODO: Call handling module
-	{reply, {tile, <<" ">>}, Location};
+	{reply, {tile, tile(Location)}, Location};
 handle_call(get_neighbours, _From, Location) ->
-	#location{ neighbours = Neighbours } = Location,
-	{reply, {neighbours, Neighbours}, Location};
+	{reply, {neighbours, neighbours(Location)}, Location};
 handle_call(stop, _From, Location) ->
 	{stop, normal, ok, Location}.
 
@@ -366,8 +373,12 @@ new_test() ->
 
 tile_test() ->
 	L = ?CREATE(),
+
 	?assertEqual(<<" ">>, tile(L)),
-	?DONE(L).
+
+	?DONE(L),
+
+	ok.
 
 join_test() ->
 	L = ?CREATE(),
@@ -388,6 +399,15 @@ join_test() ->
 		direction = east,
 		id = A
 	}, lists:keyfind(east, #neighbour.direction, neighbours(L))),
+
+	ok.
+
+neighbours_test() ->
+	L = #location{
+		neighbours = [a, b, c]
+	},
+
+	?assertMatch([a, b, c], neighbours(L)),
 
 	ok.
 
