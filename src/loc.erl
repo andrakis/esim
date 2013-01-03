@@ -39,6 +39,7 @@
 -export([handle_create/1]).
 -export([handle_type/1]).
 -export([handle_tile/1, handle_border/2]).
+-export([handle_join/3]).
 
 %% ESim API
 -export([iterate/3]).
@@ -52,6 +53,9 @@
 
 -export([new/2, stop/1]).
 
+-ifndef(TEST).
+-define(TEST, 1).
+-endif.
 -include("test.hrl").
 
 %% GenServer callbacks
@@ -107,6 +111,28 @@
 	{actor, add | remove, Actor::pid(), NewState::State}.
 -export_type([callback_result/1]).
 
+% The available responses for handle_join/3.
+-type join_response() ::
+	% Deny the join operation
+	false |
+	% Allow the join operation
+	ok |
+	% Allow the join operation and update the state
+	{ok, State::term()}.
+-export_type([join_response/0]).
+
+% The function lookup table. Each function must be named correctly,
+% as this will be used for the lookup check.
+% Additionally, the field must default to the arity of the function.
+-record(lookup, {
+	handle_create = 1   :: fun((S) -> S),
+	handle_iterate = 1  :: fun((S) -> S),
+	handle_type = 1     :: fun((S::term()) -> term()),
+	handle_tile = 1     :: fun((S) -> binary()),
+	handle_border = 2   :: fun((direction(), S::term()) -> binary()),
+	handle_join = 3     :: fun((direction(), location() | pid(), S::term()) -> join_response())
+}).
+
 %%============================================================================
 %% Reference behaviour implementation
 %%============================================================================
@@ -136,6 +162,13 @@ handle_tile(_) -> <<" ">>.
 handle_border(_Direction, _State) ->
 	% TODO: Get the tile of neighbour at Direction, or return art at Direction.
 	<<".">>.
+
+%% @doc Handle a request to join to another location.
+%%      This function can return any type join_response().
+%%      This function will not be called if a location is already at Direction.
+-spec handle_join(Direction::direction(), Other::location() | pid(), State::term())
+		-> join_response().
+handle_join(_, _, _) -> true.
 
 %% Behaviour
 -spec behaviour_info(callbacks | term()) -> [{Callback::atom(), Arity::pos_integer()}] | undefined.
@@ -176,7 +209,7 @@ stop(Pid) ->
 	gen_server:call(Pid, stop).
 
 %% @doc Create a join from Location1 to Location2 in the given Direction.
-%%      This is a one-way join - no join is performed in Locaiton1, unless you manually
+%%      This is a one-way join - no join is performed in Location1, unless you manually
 %%      perform the reverse call (eg, join(opposite(Direction), Location2, Location1)).
 -spec join(Direction::direction(), Location1::pid(), Location2::pid()) -> ok | {error, blocked}.
 join(Direction, Location1, Location2) when is_pid(Location1), is_pid(Location2) ->
@@ -189,16 +222,16 @@ join(Direction, Location1, Location2) when is_pid(Location1), is_pid(Location2) 
 
 %% @doc Get the tile for visialization.
 -spec tile(pid() | location()) -> binary().
-tile(#location{ module = Module, state = State }) ->
-	Module:handle_tile(State);
+tile(#location{ state = State, lookup = Lookup }) ->
+	(Lookup#lookup.handle_tile)(State);
 tile(Pid) when is_pid(Pid) ->
 	{tile, Tile} = gen_server:call(Pid, get_tile),
 	Tile.
 
 %% @doc Get the border tile at the given neighbour.
 -spec border(Direction::direction(), pid() | location()) -> binary().
-border(Direction, #location{ module = Module, state = State }) ->
-	Module:handle_border(Direction, State);
+border(Direction, #location{ state = State, lookup = Lookup }) ->
+	(Lookup#lookup.handle_border)(Direction, State);
 border(Direction, Pid) when is_pid(Pid) ->
 	{border, Border} = gen_server:call(Pid, {get_border, Direction}),
 	Border.
@@ -258,8 +291,8 @@ opposite(What) -> error({badarg, What}).
 init({HandlingModule, ModuleState}) ->
 	process_flag(trap_exit, true),
 	Location = #location{
-		module = HandlingModule,
-		state = ModuleState
+		state = ModuleState,
+		lookup = i_create_lookup_table(HandlingModule)
 	},
 	{ok, Location}.
 
@@ -267,17 +300,30 @@ init({HandlingModule, ModuleState}) ->
 -spec handle_call(call_messages(), From::gen_from(), Location::#location{}) ->
 		call_results().
 handle_call({join, Direction, Other}, _From, Location0) ->
-	#location{ neighbours = Neighbours } = Location0,
+	#location{
+		neighbours = Neighbours,
+		lookup = Lookup,
+		state = State0
+	} = Location0,
 	case lists:keyfind(Direction, #neighbour.direction, Neighbours) of
 		false ->
-			% TODO: Notify handling module
 			Location1 = Location0#location{
 				neighbours = [#neighbour{
 					direction = Direction,
 					id = Other
 				} | Neighbours]
 			},
-			{reply, {join, ok}, Location1};
+			case (Lookup#lookup.handle_join)(Direction, Other, State0) of
+				false ->
+					{reply, {join, {error, blocked}}, Location0};
+				true ->
+					{reply, {join, ok}, Location1};
+				{true, State1} ->
+					Location2 = Location1#location{ state = State1 },
+					{reply, {join, ok}, Location2}
+			end;
+		#neighbour{ id = Other } ->
+			{reply, {join, ok}, Location0};
 		_ ->
 			{reply, {join, {error, blocked}}, Location0}
 	end;
@@ -289,6 +335,10 @@ handle_call(get_neighbours, _From, Location) ->
 	{reply, {neighbours, neighbours(Location)}, Location};
 handle_call({get_neighbour, Direction}, _From, Location) ->
 	{reply, {neighbour, neighbour(Direction, Location)}, Location};
+% Debugging and tests only.
+handle_call({update_internal, Callback}, _From, Location0) ->
+	Location1 = Callback(Location0),
+	{reply, ok, Location1};
 handle_call(stop, _From, Location) ->
 	{stop, normal, ok, Location}.
 
@@ -296,8 +346,8 @@ handle_call(stop, _From, Location) ->
 	{noreply, _}.
 
 %% Handle an iteration request. Saves the current snapshot and starts a new iteration.
-handle_cast({iterate, Callee, Ref}, #location{ module = Module } = Location0) ->
-	Result = Module:handle_iterate(Location0#location.state),
+handle_cast({iterate, Callee, Ref}, #location{ lookup = Lookup } = Location0) ->
+	Result = (Lookup#lookup.handle_iterate)(Location0#location.state),
 	Location1 = i_handle_callback_result(Result, Location0),
 	Location2 = Location1#location{
 		iteration_reference = Ref,
@@ -360,6 +410,25 @@ code_change(_OldVsn, Location, _Extra) ->
 %% Internal functions
 %%============================================================================
 
+%% @doc Create the function lookup table.
+%% NOTE: {Module, Function} creates a valid reference to a function, similar to
+%%       erlang:apply(Module, Function, Parameters), or Module:Function(...).
+%%       It does not appear to be noticeably slower than any other form of
+%%       calling a function, except for directly calling (ie, lists:min(...)).
+%% This function uses record_info to grab the field names of #lookup{} and treat
+%% each record as a function requiring lookup.
+%% @private
+-spec i_create_lookup_table(HandlingModule::atom()) -> #lookup{}.
+i_create_lookup_table(HandlingModule) ->
+	Functions = record_info(fields, lookup),
+	[lookup | Arities] = tuple_to_list(#lookup{}),
+	FunctionArityList = lists:zip(Functions, Arities),
+	References = [ case erlang:function_exported(HandlingModule, Function, Arity) of
+		true -> {HandlingModule, Function};
+		false -> {?MODULE, Function}
+	end || {Function, Arity} <- FunctionArityList ],
+	list_to_tuple([lookup | References]).
+
 %% @doc Handle the result of a callback. All callbacks may issue instructions
 %%      by returning a type of callback_result/1.
 -spec i_handle_callback_result(Result0::callback_result(term()),
@@ -397,75 +466,138 @@ i_handle_callback_result(Result0, #location{} = Location0) ->
 %%============================================================================
 -ifdef(TEST).
 
--define(CREATE, fun() ->
-	{ok, __Instance} = new(?MODULE, []),
-	__Instance
-end).
--define(DONE, fun(__Instance) -> stop(__Instance) end).
+%% Provide a macro to update the internal #location{} state of a loc actor.
+-define(INTERNAL, (fun(__LOC, __CALLBACK) ->
+	ok = gen_server:call(__LOC, {update_internal, __CALLBACK})
+end)).
+
+%% Override the lookup table call for __WHICH on __LOC. __WHAT is the new function
+%% that will be called instead. It must have an arity equal to what is expected of
+%% the function, or the test will fail.
+-define(ON_LOOKUP(__WHICH, __LOC, __WHAT), (fun() ->
+	?INTERNAL(__LOC, fun(#location{ lookup = __Lookup } = __Location) ->
+		__Location#location{
+			lookup = __Lookup#lookup{
+				__WHICH = __WHAT
+			}
+		}
+	end)
+end)()).
+
+%% Define a test body that should work for both a snapshot (#location record) and
+%% a pid call.
+%% It works by using __RecordUpdate as both a record creation, and as a method of
+%% updating the state of the Pid version of the loc actor.
+%% It then calls __Body with the #location record, followed by the pid version.
+-define(SNAP_AND_PID(__Loc, __RecordUpdate, __Body), (fun() ->
+	Snap = __RecordUpdate,
+	__Body(Snap),
+	?INTERNAL(__Loc, fun(__L) ->
+		__L __RecordUpdate
+	end),
+	__Body(__Loc)
+end)()).
+
+%% Create a #location record that can be used directly - ie, complete with lookup
+%% table.
+-define(CREATE(), #location{
+		lookup = i_create_lookup_table(?MODULE)
+	}
+).
+
+% Required to use Mockgyver.
+loc_test_() ->
+	?WITH_MOCKED_SETUP(fun setup/0, fun cleanup/1).
+
+-spec setup() -> Instance::pid().
+setup() ->
+	{ok, Instance} = new(?MODULE, []),
+	Instance.
+
+-spec cleanup(Instance::pid()) -> ok.
+cleanup(Instance) ->
+	stop(Instance),
+	ok.
+
+i_create_lookup_table_test() ->
+	?LET(L, i_create_lookup_table(?MODULE), begin
+		?assertEqual({?MODULE, handle_create}, L#lookup.handle_create),
+		?assertEqual({?MODULE, handle_iterate}, L#lookup.handle_iterate),
+		?assertEqual({?MODULE, handle_type}, L#lookup.handle_type),
+		?assertEqual({?MODULE, handle_tile}, L#lookup.handle_tile),
+		?assertEqual({?MODULE, handle_border}, L#lookup.handle_border),
+		?assertEqual({?MODULE, handle_join}, L#lookup.handle_join),
+		ok
+	end),
+
+	ok.
 
 new_test() ->
 	?assertMatch({ok, _}, new(?MODULE, undefined)).
 
-tile_test() ->
-	L = ?CREATE(),
-
-	?assertEqual(<<" ">>, tile(L)),
-
-	?DONE(L),
-
+tile_test(Loc) ->
+	?assertEqual(<<" ">>, tile(Loc)),
 	ok.
 
-border_test() ->
-	L = ?CREATE(),
-
-	?assertEqual(<<".">>, border(east, L)),
-
-	?DONE(L),
-
+border_test(Loc) ->
+	?assertEqual(<<".">>, border(east, Loc)),
 	ok.
 
-join_test() ->
-	L = ?CREATE(),
+join_test(Loc) ->
 	A = erlang:list_to_pid("<0.123.0>"),
 	B = erlang:list_to_pid("<0.123.456>"),
 
-	?assertMatch([], neighbours(L)),
+	?assertMatch([], neighbours(Loc)),
 
-	?assertEqual(ok, join(east, A, L)),
+	?assertEqual(ok, join(east, A, Loc)),
 	?assertMatch(#neighbour{
 		direction = east,
 		id = A
-	}, lists:keyfind(east, #neighbour.direction, neighbours(L))),
+	}, lists:keyfind(east, #neighbour.direction, neighbours(Loc))),
 
 	% Joining another location in the same direction fails
-	?assertEqual({error, blocked}, join(east, B, L)),
+	?assertEqual({error, blocked}, join(east, B, Loc)),
 	?assertMatch(#neighbour{
 		direction = east,
 		id = A
-	}, lists:keyfind(east, #neighbour.direction, neighbours(L))),
+	}, lists:keyfind(east, #neighbour.direction, neighbours(Loc))),
 
 	ok.
 
-neighbours_test() ->
-	L = #location{
+handle_join_test(Loc) ->
+	?ON_LOOKUP(handle_join, Loc, fun(Direction, _, _) ->
+		case Direction of
+			east -> false;
+			west -> true;
+			north -> {true, new_state}
+		end
+	end),
+
+	J1 = self(),
+
+	?assertEqual({error, blocked}, join(east, J1, Loc)),
+	?assertEqual(ok, join(west, J1, Loc)),
+
+	ok.
+
+neighbours_test(Loc) ->
+	?SNAP_AND_PID(Loc, #location{
 		neighbours = [a, b, c]
-	},
-
-	?assertMatch([a, b, c], neighbours(L)),
+	}, fun(_L) -> ?assertMatch([a, b, c], neighbours(_L)) end),
 
 	ok.
 
-neighbour_test() ->
-	L = #location{
+neighbour_test(Loc) ->
+	?SNAP_AND_PID(Loc, #location{
 		neighbours = [
 			#neighbour{ direction = east, id = e },
 			#neighbour{ direction = south, id = s }
 		]
-	},
-
-	?assertEqual(#neighbour{ direction = east, id = e }, neighbour(east, L)),
-	?assertEqual(#neighbour{ direction = south, id = s }, neighbour(south, L)),
-	?assertEqual(false, neighbour(north, L)),
+	}, fun(L) ->
+		?assertEqual(#neighbour{ direction = east, id = e }, neighbour(east, L)),
+		?assertEqual(#neighbour{ direction = south, id = s }, neighbour(south, L)),
+		?assertEqual(false, neighbour(north, L))
+	end),
 
 	ok.
 
@@ -483,7 +615,8 @@ init_test() ->
 
 iterate_test() ->
 	Self = self(),
-	Location0 = #location{
+	Location0 = ?CREATE(),
+	Location1 = Location0#location{
 		sub_locations = [Self]
 	},
 	Ref = make_ref(),
@@ -491,7 +624,7 @@ iterate_test() ->
 		iteration_reference = Ref,
 		iteration_waitlist = [Self],
 		iteration_callee = Self
-	}}, handle_cast({iterate, Self, Ref}, Location0)),
+	}}, handle_cast({iterate, Self, Ref}, Location1)),
 	% Note: normally this would be called from Pid's process. Since we
 	% directly called handle_cast, it's actually our pid.
 	?assertEqual(ok, receive
@@ -504,7 +637,8 @@ iterate_test() ->
 iterate_complete_test() ->
 	Self = self(),
 	Ref = make_ref(),
-	LocationOne = #location{
+	Base = ?CREATE(),
+	LocationOne = Base#location{
 		iteration_reference = Ref,
 		iteration_waitlist = [Self],
 		iteration_callee = Self
@@ -533,18 +667,22 @@ iterate_complete_test() ->
 callback_result_test() ->
 	Self = self(),
 	Fun = fun i_handle_callback_result/2,
-	State0 = #location{ state = notset },
-	?assertMatch(#location{ state = now_set }, Fun({ok, now_set}, State0)),
+	State0 = ?CREATE(),
+	State1 = State0#location{ state = notset },
+	?assertMatch(#location{ state = now_set }, Fun({ok, now_set}, State1)),
 
 	% Adding and removing sub locations
-	SubLocAdd = Fun({sub_location, add, Self, add_loc}, State0),
+	SubLocAdd = Fun({sub_location, add, Self, add_loc}, State1),
 	?assertMatch(#location{ state = add_loc, sub_locations = [Self] }, SubLocAdd),
 	SubLocRem = Fun({sub_location, remove, Self, rem_loc}, SubLocAdd),
 	?assertMatch(#location{ state = rem_loc, sub_locations = [] }, SubLocRem),
 
 	% Adding and removing actor
-	ActorAdd = Fun({actor, add, Self, add_act}, State0),
+	ActorAdd = Fun({actor, add, Self, add_act}, State1),
 	?assertMatch(#location{ state = add_act, actors = [Self] }, ActorAdd),
 	ActorRem = Fun({actor, remove, Self, rem_act}, ActorAdd),
-	?assertMatch(#location{ state = rem_act, actors = [] }, ActorRem).
+	?assertMatch(#location{ state = rem_act, actors = [] }, ActorRem),
+
+	ok.
+
 -endif.

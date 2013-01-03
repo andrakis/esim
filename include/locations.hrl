@@ -44,14 +44,14 @@
 	iteration_waitlist = []  :: [pid()],
 	% Who asked for this iteration?
 	iteration_callee         :: pid(),
-	% The module that will handle events
-	module = loc             :: atom(),
 	% Specific location record goes here
 	state                    :: term(),
 	% A snapshot of every member in this location
 	snapshot = []            :: [term()],
 	% The new snapshot as we build it
-	snapshot_building = []   :: [term()]
+	snapshot_building = []   :: [term()],
+	% The function lookup table, opaque type loc:#lookup{}
+	lookup
 }).
 -type location() :: #location{}.
 
